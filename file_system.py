@@ -107,17 +107,20 @@ class InodeTag(Model):
 class FileSystem:
     def __init__(self, db_path):
         if not db_path.strip():
-            raise ParameterException(F'{db_path} is required to create a FileSystem')
+            raise ParameterException(
+                F'{db_path} is required to create a FileSystem')
 
         self._db_path = db_path
         self._db = _db
         self._db.init(self._db_path)
         self._db.connect()
-        self._db.create_tables([User, Group, Inode, Directory, Ancestor, FullPath, Tag, InodeTag])
+        self._db.create_tables(
+            [User, Group, Inode, Directory, Ancestor, FullPath, Tag, InodeTag])
 
         # get or create root node
+        root = 1
         if not Inode.select().where(Inode.id == 1):
-            Inode.create(
+            root = Inode.create(
                 node_type=int(InodeType.DIRECTORY),
                 name='/',
                 size=0,
@@ -129,8 +132,9 @@ class FileSystem:
                 group_permission=0,
             )
 
-        self._root_inode = 1
+            FullPath.create(inode=root, path='/')
 
+        self._root_inode = root
 
     @property
     def db(self):
@@ -143,16 +147,17 @@ class FileSystem:
         path = os.path.abspath(path)
 
         exist_index = Inode.select()\
-                .join(Directory, on=Directory.inode)\
-                .join(FullPath, on=(Directory.child == FullPath.inode))\
-                .where((Inode.id == self._root_inode) & (FullPath.path == path))
+            .join(Directory, on=Directory.inode)\
+            .join(FullPath, on=(Directory.child == FullPath.inode))\
+            .where((Inode.id == self._root_inode) & (FullPath.path == path))
 
         if exist_index:
             raise DuplicateIndexException(F'{path} is already indexed')
 
-        root_inode = self.create_inode(os.path.basename(path), path, InodeType.DIRECTORY)
+        root_inode = self.create_inode(
+            os.path.basename(path), path, InodeType.DIRECTORY)
         self.link_parent(self._root_inode, root_inode)
-        stack = [(os.path.abspath(path), root_inode, [])] # stack of str
+        stack = [(os.path.abspath(path), root_inode, [])]
 
         with self._db.atomic() as tx:
             while stack:
@@ -174,13 +179,13 @@ class FileSystem:
                         inode_type = InodeType.SOFTLINK
 
                     if inode_type != InodeType(0):
-                        inode = self.create_inode(entry.name, entry.path, inode_type)
+                        inode = self.create_inode(
+                            entry.name, entry.path, inode_type)
                         self.link_parent(visiting_inode, inode)
                         self.link_ancestors(ancestors, inode)
 
                         if inode_type == InodeType.DIRECTORY:
                             stack.append((entry.path, inode, ancestors))
-
 
     def link_parent(self, parent, child):
         Directory.create(inode=parent, child=child)
@@ -243,7 +248,7 @@ class FileSystem:
 
     def to_datetime(self, st_time):
         return datetime.fromtimestamp(st_time, tz=timezone.utc)
-    
+
     def parse_owner_permission(self, mode):
         perm = Permission(0)
         if stat.S_IXUSR & mode:
@@ -265,3 +270,26 @@ class FileSystem:
             perm |= Permission.READ
 
         return perm
+
+    @property
+    def root_inode(self):
+        return self._root_inode
+
+    def get_full_path(self, inode):
+        result = FullPath.select(FullPath.path).where(FullPath.inode == inode)
+        if result:
+            return result[0].path
+
+        return ''
+
+    def list_inode(self, inode_id, get_self=False):
+        inode = Inode.select().where(Inode.id == inode_id)
+        if not inode:
+            return None
+
+        inode = inode[0]
+
+        if inode.node_type == InodeType.DIRECTORY and not get_self:
+            return Inode.select().join(Directory, on=(Directory.child == Inode.id)).where(Directory.inode == inode_id)
+
+        return [inode]
