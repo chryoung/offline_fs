@@ -4,11 +4,11 @@ The program creates a read-only SQLite database containing the metadata of the g
 
 # Prerequisite
 
-pip install -r requirements.txt
+`pip install -r requirements.txt`
 
 # Usage
 
 ## Index
 
-python main.py index directory_1 directory_2
+`python main.py index directory_1 directory_2`
 

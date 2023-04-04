@@ -44,7 +44,7 @@ class Group(Model):
 
 class Inode(Model):
     id = AutoField(primary_key=True)
-    node_type = IntegerField()
+    node_type = IntegerField(index=True)
     name = TextField(index=True)
     size = IntegerField(index=True)
     created_time = DateTimeField(index=True)
@@ -63,10 +63,21 @@ class Directory(Model):
     child = ForeignKeyField(Inode, backref='children')
 
     class Meta:
+        database = _db
         indexes = (
             (('inode', 'child'), True),
         )
+
+
+class Ancestor(Model):
+    ancestor = ForeignKeyField(Inode, backref='ancestors')
+    inode = ForeignKeyField(Inode, backref='inodes')
+
+    class Meta:
         database = _db
+        indexes = (
+            (('ancestor', 'inode'), True),
+        )
 
 
 class FullPath(Model):
@@ -94,12 +105,15 @@ class InodeTag(Model):
 
 
 class FileSystem:
-    def __init__(self, db_path='file_system.db'):
+    def __init__(self, db_path):
+        if not db_path.strip():
+            raise ParameterException(F'{db_path} is required to create a FileSystem')
+
         self._db_path = db_path
         self._db = _db
         self._db.init(self._db_path)
         self._db.connect()
-        self._db.create_tables([User, Group, Inode, Directory, FullPath, Tag, InodeTag])
+        self._db.create_tables([User, Group, Inode, Directory, Ancestor, FullPath, Tag, InodeTag])
 
         # get or create root node
         if not Inode.select().where(Inode.id == 1):
@@ -132,18 +146,21 @@ class FileSystem:
                 .join(Directory, on=Directory.inode)\
                 .join(FullPath, on=(Directory.child == FullPath.inode))\
                 .where((Inode.id == self._root_inode) & (FullPath.path == path))
+
         if exist_index:
             raise DuplicateIndexException(F'{path} is already indexed')
 
         root_inode = self.create_inode(os.path.basename(path), path, InodeType.DIRECTORY)
         self.link_parent(self._root_inode, root_inode)
-        stack = [(os.path.abspath(path), root_inode)] # stack of str
+        stack = [(os.path.abspath(path), root_inode, [])] # stack of str
 
         with self._db.atomic() as tx:
             while stack:
-                # get top element
-                visiting, visiting_inode = stack[-1]
-                # pop top element
+                # get the top element
+                visiting, visiting_inode, ancestors = stack[-1]
+                ancestors = ancestors.copy()
+                ancestors.append(visiting_inode)
+                # pop the top element
                 stack = stack[:-2]
 
                 for entry in os.scandir(visiting):
@@ -159,13 +176,18 @@ class FileSystem:
                     if inode_type != InodeType(0):
                         inode = self.create_inode(entry.name, entry.path, inode_type)
                         self.link_parent(visiting_inode, inode)
+                        self.link_ancestors(ancestors, inode)
 
                         if inode_type == InodeType.DIRECTORY:
-                            stack.append((entry.path, inode))
+                            stack.append((entry.path, inode, ancestors))
 
 
     def link_parent(self, parent, child):
         Directory.create(inode=parent, child=child)
+
+    def link_ancestors(self, ancestors, inode):
+        for ancestor in ancestors:
+            Ancestor.create(ancestor=ancestor, inode=inode)
 
     def create_inode(self, name, path, inode_type):
         stat = self.get_stat(path)
