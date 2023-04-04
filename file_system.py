@@ -49,8 +49,8 @@ class Inode(Model):
     size = IntegerField(index=True)
     created_time = DateTimeField(index=True)
     modified_time = DateTimeField(index=True)
-    owner = ForeignKeyField(User, backref='name')
-    group = ForeignKeyField(Group, backref='name')
+    owner = ForeignKeyField(User, backref='owner')
+    group = ForeignKeyField(Group, backref='groups')
     owner_permission = IntegerField()
     group_permission = IntegerField()
 
@@ -59,15 +59,18 @@ class Inode(Model):
 
 
 class Directory(Model):
-    inode = ForeignKeyField(Inode, index=True)
-    child = ForeignKeyField(Inode)
+    inode = ForeignKeyField(Inode, backref='parent')
+    child = ForeignKeyField(Inode, backref='children')
 
     class Meta:
+        indexes = (
+            (('inode', 'child'), True),
+        )
         database = _db
 
 
 class FullPath(Model):
-    inode = ForeignKeyField(Inode, index=True)
+    inode = ForeignKeyField(Inode, index=True, backref='inode')
     path = TextField()
 
     class Meta:
@@ -83,8 +86,8 @@ class Tag(Model):
 
 
 class InodeTag(Model):
-    inode = ForeignKeyField(Inode)
-    tag = ForeignKeyField(Tag)
+    inode = ForeignKeyField(Inode, index=True, backref='inode')
+    tag = ForeignKeyField(Tag, index=True, backref='tags')
 
     class Meta:
         database = _db
@@ -98,6 +101,23 @@ class FileSystem:
         self._db.connect()
         self._db.create_tables([User, Group, Inode, Directory, FullPath, Tag, InodeTag])
 
+        # get or create root node
+        if not Inode.select().where(Inode.id == 1):
+            Inode.create(
+                node_type=int(InodeType.DIRECTORY),
+                name='/',
+                size=0,
+                created_time=datetime.now(),
+                modified_time=datetime.now(),
+                owner=0,
+                group=0,
+                owner_permission=0,
+                group_permission=0,
+            )
+
+        self._root_inode = 1
+
+
     @property
     def db(self):
         return self._db
@@ -106,18 +126,51 @@ class FileSystem:
         if not os.path.isdir(path):
             raise ParameterException(F'{path} is not a directory')
 
+        path = os.path.abspath(path)
+
+        exist_index = Inode.select()\
+                .join(Directory, on=Directory.inode)\
+                .join(FullPath, on=(Directory.child == FullPath.inode))\
+                .where((Inode.id == self._root_inode) & (FullPath.path == path))
+        if exist_index:
+            raise DuplicateIndexException(F'{path} is already indexed')
+
+        root_inode = self.create_inode(os.path.basename(path), path, InodeType.DIRECTORY)
+        self.link_parent(self._root_inode, root_inode)
+        stack = [(os.path.abspath(path), root_inode)] # stack of str
+
         with self._db.atomic() as tx:
-            for root, dirs, files in os.walk(path):
-                for dir in dirs:
-                    self.create_inode(dir, os.path.join(root, dir), InodeType.DIRECTORY)
-                for file in files:
-                    self.create_inode(file, os.path.join(root, file), InodeType.FILE)
+            while stack:
+                # get top element
+                visiting, visiting_inode = stack[-1]
+                # pop top element
+                stack = stack[:-2]
+
+                for entry in os.scandir(visiting):
+                    inode_type = InodeType(0)
+
+                    if entry.is_dir():
+                        inode_type = InodeType.DIRECTORY
+                    elif entry.is_file():
+                        inode_type = InodeType.FILE
+                    elif entry.is_symlink():
+                        inode_type = InodeType.SOFTLINK
+
+                    if inode_type != InodeType(0):
+                        inode = self.create_inode(entry.name, entry.path, inode_type)
+                        self.link_parent(visiting_inode, inode)
+
+                        if inode_type == InodeType.DIRECTORY:
+                            stack.append((entry.path, inode))
 
 
-    def create_inode(self, name, path, node_type):
+    def link_parent(self, parent, child):
+        Directory.create(inode=parent, child=child)
+
+    def create_inode(self, name, path, inode_type):
         stat = self.get_stat(path)
         inode = Inode.create(
-            node_type=int(node_type),
+            node_type=int(inode_type),
             name=name,
             size=stat['size'],
             created_time=stat['created_time'],
@@ -129,6 +182,8 @@ class FileSystem:
         )
 
         FullPath.create(inode=inode, path=os.path.abspath(path))
+
+        return inode
 
     @lru_cache
     def get_or_create_user(self, uid):
