@@ -12,3 +12,6 @@ The program creates a read-only SQLite database containing the metadata of the g
 
 `python main.py index directory_1 directory_2`
 
+
+## Interactive mode
+` python main.py i`
