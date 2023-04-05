@@ -1,6 +1,6 @@
 import argparse
 import file_system
-import eval_loop
+import fsshell
 
 parser = argparse.ArgumentParser(prog='Offline Filesystem')
 parser.add_argument('-d', '--db', default='file_system.db',
@@ -23,5 +23,5 @@ if args.sub_command in ('index', 'idx'):
     for path in args.paths:
         fs.index(path)
 elif args.sub_command in ('interactive', 'i'):
-    loop = eval_loop.EvalLoop(fs)
-    loop.run()
+    shell = fsshell.FsShell(fs)
+    shell.cmdloop()

@@ -7,8 +7,9 @@ import pwd
 import grp
 import stat
 from functools import lru_cache
+from pathlib import PurePath
 
-
+INVALID_INODE = -1
 _db = SqliteDatabase(None)
 
 
@@ -119,7 +120,7 @@ class FileSystem:
 
         # get or create root node
         root = 1
-        if not Inode.select().where(Inode.id == 1):
+        if not Inode.select().where(Inode.id == root):
             root = Inode.create(
                 node_type=int(InodeType.DIRECTORY),
                 name='/',
@@ -144,20 +145,21 @@ class FileSystem:
         if not os.path.isdir(path):
             raise ParameterException(F'{path} is not a directory')
 
-        path = os.path.abspath(path)
+        path = PurePath(os.path.abspath(path))
 
         exist_index = Inode.select()\
             .join(Directory, on=Directory.inode)\
             .join(FullPath, on=(Directory.child == FullPath.inode))\
-            .where((Inode.id == self._root_inode) & (FullPath.path == path))
+            .where((Inode.id == self._root_inode) & (FullPath.path == str(path)))
 
         if exist_index:
             raise DuplicateIndexException(F'{path} is already indexed')
 
+        new_root_path = PurePath(F'/{path.name}')
         root_inode = self.create_inode(
-            os.path.basename(path), path, InodeType.DIRECTORY)
+            path.name, str(path), InodeType.DIRECTORY, new_root_path)
         self.link_parent(self._root_inode, root_inode)
-        stack = [(os.path.abspath(path), root_inode, [])]
+        stack = [(path, root_inode, [])]
 
         with self._db.atomic() as tx:
             while stack:
@@ -166,26 +168,30 @@ class FileSystem:
                 ancestors = ancestors.copy()
                 ancestors.append(visiting_inode)
                 # pop the top element
-                stack = stack[:-2]
+                stack = stack[:-1]
 
-                for entry in os.scandir(visiting):
-                    inode_type = InodeType(0)
+                try:
+                    for entry in os.scandir(visiting):
+                        inode_type = InodeType(0)
 
-                    if entry.is_dir():
-                        inode_type = InodeType.DIRECTORY
-                    elif entry.is_file():
-                        inode_type = InodeType.FILE
-                    elif entry.is_symlink():
-                        inode_type = InodeType.SOFTLINK
+                        if entry.is_dir():
+                            inode_type = InodeType.DIRECTORY
+                        elif entry.is_file():
+                            inode_type = InodeType.FILE
+                        elif entry.is_symlink():
+                            inode_type = InodeType.SOFTLINK
 
-                    if inode_type != InodeType(0):
-                        inode = self.create_inode(
-                            entry.name, entry.path, inode_type)
-                        self.link_parent(visiting_inode, inode)
-                        self.link_ancestors(ancestors, inode)
+                        if inode_type != InodeType(0):
+                            entry_path = PurePath(entry.path)
+                            inode = self.create_inode(
+                                entry.name, entry.path, inode_type, str(PurePath(new_root_path / entry_path.relative_to(path))))
+                            self.link_parent(visiting_inode, inode)
+                            self.link_ancestors(ancestors, inode)
 
-                        if inode_type == InodeType.DIRECTORY:
-                            stack.append((entry.path, inode, ancestors))
+                            if inode_type == InodeType.DIRECTORY:
+                                stack.append((entry.path, inode, ancestors))
+                except PermissionError as perm_ex:
+                    print(F'Insufficient permission to visit {visiting}: {perm_ex}')
 
     def link_parent(self, parent, child):
         Directory.create(inode=parent, child=child)
@@ -194,7 +200,7 @@ class FileSystem:
         for ancestor in ancestors:
             Ancestor.create(ancestor=ancestor, inode=inode)
 
-    def create_inode(self, name, path, inode_type):
+    def create_inode(self, name, path, inode_type, full_path=''):
         stat = self.get_stat(path)
         inode = Inode.create(
             node_type=int(inode_type),
@@ -208,7 +214,10 @@ class FileSystem:
             group_permission=int(stat['group_permission']),
         )
 
-        FullPath.create(inode=inode, path=os.path.abspath(path))
+        if full_path:
+            FullPath.create(inode=inode, path=full_path)
+        else:
+            FullPath.create(inode=inode, path=os.path.abspath(path))
 
         return inode
 
@@ -249,6 +258,7 @@ class FileSystem:
     def to_datetime(self, st_time):
         return datetime.fromtimestamp(st_time, tz=timezone.utc)
 
+    @lru_cache
     def parse_owner_permission(self, mode):
         perm = Permission(0)
         if stat.S_IXUSR & mode:
@@ -260,6 +270,7 @@ class FileSystem:
 
         return perm
 
+    @lru_cache
     def parse_group_permission(self, mode):
         perm = Permission(0)
         if stat.S_IXGRP & mode:
@@ -275,21 +286,49 @@ class FileSystem:
     def root_inode(self):
         return self._root_inode
 
-    def get_full_path(self, inode):
-        result = FullPath.select(FullPath.path).where(FullPath.inode == inode)
+    @lru_cache
+    def get_full_path(self, inode_id):
+        result = FullPath.select(FullPath.path).where(FullPath.inode == inode_id)
         if result:
             return result[0].path
 
-        return ''
+        return None
 
+    @lru_cache
     def list_inode(self, inode_id, get_self=False):
         inode = Inode.select().where(Inode.id == inode_id)
+
         if not inode:
             return None
 
         inode = inode[0]
 
         if inode.node_type == InodeType.DIRECTORY and not get_self:
-            return Inode.select().join(Directory, on=(Directory.child == Inode.id)).where(Directory.inode == inode_id)
+            return Inode\
+                    .select()\
+                    .join(Directory, on=(Directory.child == Inode.id))\
+                    .where(Directory.inode == inode_id)
 
         return [inode]
+
+    @lru_cache
+    def list_pattern(self, inode_id, pattern):
+        return Inode\
+                .select()\
+                .join(Directory, on=(Directory.child == Inode.id))\
+                .where((Directory.inode == inode_id) & (Inode.name ** pattern))
+
+    @lru_cache
+    def get_parent_inode_id(self, inode_id):
+        result = Directory.select(Directory.inode).where(Directory.child == inode_id)
+        if result:
+            return result[0].inode
+
+        return INVALID_INODE
+
+    def is_dir(self, inode_id):
+        if Inode.select(Inode.id).where((Inode.id == inode_id) & (Inode.node_type == int(InodeType.DIRECTORY))):
+            return True
+
+        return False
+
