@@ -191,7 +191,8 @@ class FileSystem:
                             if inode_type == InodeType.DIRECTORY:
                                 stack.append((entry.path, inode, ancestors))
                 except PermissionError as perm_ex:
-                    print(F'Insufficient permission to visit {visiting}: {perm_ex}')
+                    print(
+                        F'Insufficient permission to visit {visiting}: {perm_ex}')
 
     def link_parent(self, parent, child):
         Directory.create(inode=parent, child=child)
@@ -288,7 +289,8 @@ class FileSystem:
 
     @lru_cache
     def get_full_path(self, inode_id):
-        result = FullPath.select(FullPath.path).where(FullPath.inode == inode_id)
+        result = FullPath.select(FullPath.path).where(
+            FullPath.inode == inode_id)
         if result:
             return result[0].path
 
@@ -305,22 +307,23 @@ class FileSystem:
 
         if inode.node_type == InodeType.DIRECTORY and not get_self:
             return Inode\
-                    .select()\
-                    .join(Directory, on=(Directory.child == Inode.id))\
-                    .where(Directory.inode == inode_id)
+                .select()\
+                .join(Directory, on=(Directory.child == Inode.id))\
+                .where(Directory.inode == inode_id)
 
         return [inode]
 
     @lru_cache
     def list_pattern(self, inode_id, pattern):
         return Inode\
-                .select()\
-                .join(Directory, on=(Directory.child == Inode.id))\
-                .where((Directory.inode == inode_id) & (Inode.name ** pattern))
+            .select()\
+            .join(Directory, on=(Directory.child == Inode.id))\
+            .where((Directory.inode == inode_id) & (Inode.name ** pattern))
 
     @lru_cache
     def get_parent_inode_id(self, inode_id):
-        result = Directory.select(Directory.inode).where(Directory.child == inode_id)
+        result = Directory.select(Directory.inode).where(
+            Directory.child == inode_id)
         if result:
             return result[0].inode
 
@@ -331,4 +334,3 @@ class FileSystem:
             return True
 
         return False
-

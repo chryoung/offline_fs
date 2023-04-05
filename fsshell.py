@@ -4,6 +4,7 @@ import shlex
 import argparse
 import file_system
 
+
 class FsShell(cmd.Cmd):
     def __init__(self, fs):
         super().__init__()
@@ -12,12 +13,18 @@ class FsShell(cmd.Cmd):
         self._last_inode = self._fs.root_inode
         self.change_directory(self._fs.root_inode)
 
-        self._ls_arg_parser = argparse.ArgumentParser(add_help=False, prog='ls', description='list directory contents')
-        self._ls_arg_parser.add_argument('-l', action='store_true', dest='long', default=False, help='list files in the long format')
-        self._ls_arg_parser.add_argument('-h', action='store_true', dest='human', default=False, help='show human-readable size')
-        self._ls_arg_parser.add_argument('-a', action='store_true', dest='hidden', default=False, help='list hidden files')
-        self._ls_arg_parser.add_argument('--help', action='help', help='show this help')
-        self._ls_arg_parser.add_argument('paths', nargs='*', help='paths to list')
+        self._ls_arg_parser = argparse.ArgumentParser(
+            add_help=False, prog='ls', description='list directory contents')
+        self._ls_arg_parser.add_argument(
+            '-l', action='store_true', dest='long', default=False, help='list files in the long format')
+        self._ls_arg_parser.add_argument(
+            '-h', action='store_true', dest='human', default=False, help='show human-readable size')
+        self._ls_arg_parser.add_argument(
+            '-a', action='store_true', dest='hidden', default=False, help='list hidden files')
+        self._ls_arg_parser.add_argument(
+            '--help', action='help', help='show this help')
+        self._ls_arg_parser.add_argument(
+            'paths', nargs='*', help='paths to list')
 
     def change_directory(self, new_dir_inode):
         if self._current_inode == new_dir_inode and new_dir_inode != self._fs.root_inode:
@@ -69,12 +76,14 @@ class FsShell(cmd.Cmd):
         completion = []
 
         if not text:
-            completion = [shlex.quote(inode.name) for inode in self._current_children]
+            completion = [shlex.quote(inode.name)
+                          for inode in self._current_children]
         else:
-            completion = [shlex.quote(inode.name) for inode in self._current_children if inode.name.lower().startswith(text.lower())]
+            completion = [shlex.quote(
+                inode.name) for inode in self._current_children if inode.name.lower().startswith(text.lower())]
 
         return completion
-    
+
     def do_cd(self, arg):
         'Change directory'
 
@@ -132,7 +141,8 @@ class FsShell(cmd.Cmd):
             return False
 
         found = False
-        children = [child for child in self._current_children if child.name == directory]
+        children = [
+            child for child in self._current_children if child.name == directory]
         if children:
             self.change_directory(children[0].id)
 
@@ -142,17 +152,19 @@ class FsShell(cmd.Cmd):
 
             return False
 
-
     def complete_cd(self, text, line, beginidx, endidx):
         completion = []
 
         if '/' not in line:
             if not text:
-                completion = [shlex.quote(inode.name) for inode in self._current_children if inode.node_type == file_system.InodeType.DIRECTORY]
+                completion = [shlex.quote(
+                    inode.name) for inode in self._current_children if inode.node_type == file_system.InodeType.DIRECTORY]
             else:
-                completion = [shlex.quote(inode.name) for inode in self._current_children if inode.node_type == file_system.InodeType.DIRECTORY and inode.name.lower().startswith(text.lower())]
+                completion = [shlex.quote(inode.name) for inode in self._current_children if inode.node_type ==
+                              file_system.InodeType.DIRECTORY and inode.name.lower().startswith(text.lower())]
         else:
-            path = [s for s in re.sub(r'''^\s*cd\s+''', '', line).split('/') if s][:-1]
+            path = [s for s in re.sub(
+                r'''^\s*cd\s+''', '', line).split('/') if s][:-1]
             completion = self.get_path_completion(path)
 
         return completion
@@ -163,13 +175,15 @@ class FsShell(cmd.Cmd):
         '''
         current_inode = self._current_inode
         while path:
-            children = [inode for inode in self._fs.list_inode(current_inode) if inode.name == path]
+            children = [inode for inode in self._fs.list_inode(
+                current_inode) if inode.name == path]
             if not children:
                 break
             current_inode = children[0].id
             path = path[1:]
 
-        completion = [inode.name for inode in self._fs.list_inode(current_inode)]
+        completion = [
+            inode.name for inode in self._fs.list_inode(current_inode)]
 
     def do_q(self, arg):
         'Quit shell'
@@ -178,4 +192,3 @@ class FsShell(cmd.Cmd):
     def do_exit(self, arg):
         'Quit shell'
         return True
-
