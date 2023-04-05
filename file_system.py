@@ -150,14 +150,26 @@ class FileSystem:
         exist_index = Inode.select()\
             .join(Directory, on=Directory.inode)\
             .join(FullPath, on=(Directory.child == FullPath.inode))\
-            .where((Inode.id == self._root_inode) & (FullPath.path == str(path)))
+            .where((Inode.id == self._root_inode) & (FullPath.path == F'/{path.name}'))
 
         if exist_index:
-            raise DuplicateIndexException(F'{path} is already indexed')
+            user_input = input(F'{path} is already indexed. Do you want to index it with a new name?[y/N]')
+            if user_input.strip() == 'y':
+                new_name = input('New name: ').strip()
+                while Inode.select(Inode.name).join(Directory, on=(Directory.child == Inode.id)).where((Directory.inode == self.root_inode) & (Inode.name == new_name)):
+                    print('Name exists.')
+                    new_name = input('Enter another name: ').strip()
 
-        new_root_path = PurePath(F'/{path.name}')
+                new_root_path = PurePath(F'/{new_name}')
+            else:
+                return
+        else:
+            new_root_path = PurePath(F'/{path.name}')
+
+
+
         root_inode = self.create_inode(
-            path.name, str(path), InodeType.DIRECTORY, new_root_path)
+            new_root_path.name, str(path), InodeType.DIRECTORY, new_root_path)
         self.link_parent(self._root_inode, root_inode)
         stack = [(path, root_inode, [])]
 
@@ -183,8 +195,11 @@ class FileSystem:
 
                         if inode_type != InodeType(0):
                             entry_path = PurePath(entry.path)
-                            inode = self.create_inode(
-                                entry.name, entry.path, inode_type, str(PurePath(new_root_path / entry_path.relative_to(path))))
+                            try:
+                                inode = self.create_inode(
+                                    entry.name, entry.path, inode_type, str(PurePath(new_root_path / entry_path.relative_to(path))))
+                            except FileNotFoundError as not_found_ex:
+                                print(F'Cannot create inode: {not_found_ex}')
                             self.link_parent(visiting_inode, inode)
                             self.link_ancestors(ancestors, inode)
 
@@ -193,6 +208,10 @@ class FileSystem:
                 except PermissionError as perm_ex:
                     print(
                         F'Insufficient permission to visit {visiting}: {perm_ex}')
+                except FileNotFoundError as not_found_ex:
+                    print(F'Cannot find directory to scan: {not_found_ex}')
+                except Exception as e:
+                    print(F'Failed to scan {visiting}: {e}')
 
     def link_parent(self, parent, child):
         Directory.create(inode=parent, child=child)
