@@ -37,7 +37,10 @@ class FsShell(cmd.Cmd):
         self._last_inode = self._current_inode
         self._current_inode = new_dir_inode
         self._current_children = self._fs.list_inode(new_dir_inode)
-        self.prompt = F'{self._fs.get_full_path(new_dir_inode)} > '
+        full_path = self._fs.get_full_path(new_dir_inode)
+        if not full_path.endswith('/'):
+            full_path += '/'
+        self.prompt = F'{full_path} > '
 
         return True
 
