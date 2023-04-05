@@ -61,6 +61,9 @@ class FsShell(cmd.Cmd):
 
         try:
             args = self._ls_arg_parser.parse_args(shlex.split(arg))
+        except ValueError as ve:
+            print(F'Invalid parameter: {ve}')
+            return
         except SystemExit:
             return
 
@@ -103,6 +106,7 @@ class FsShell(cmd.Cmd):
             print('Too many arguments')
             return
 
+        # Todo: Path needs to be resolved first
         path = args[0].split('/')
         if path[0] == '-':
             if len(path) == 1:
@@ -174,7 +178,7 @@ class FsShell(cmd.Cmd):
 
     def get_path_completion(self, path):
         '''
-        TODO: This doesn't work. Fix it.
+        Todo: This doesn't work. Fix it.
         '''
         current_inode = self._current_inode
         while path:
