@@ -171,7 +171,7 @@ class FileSystem:
         root_inode = self.create_inode(
             new_root_path.name, str(path), InodeType.DIRECTORY, new_root_path)
         self.link_parent(self._root_inode, root_inode)
-        stack = [(path, root_inode, [])]
+        stack = [(path, root_inode, [self._root_inode])]
 
         with self._db.atomic() as tx:
             while stack:
@@ -353,3 +353,8 @@ class FileSystem:
             return True
 
         return False
+
+    def find_by_name(self, current_inode, name):
+        return Inode.select()\
+                .join(Ancestor, on=(Ancestor.inode == Inode.id))\
+                .where((Ancestor.ancestor == current_inode) & (Inode.name ** F'%{name}%'))

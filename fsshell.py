@@ -192,10 +192,26 @@ class FsShell(cmd.Cmd):
         completion = [
             inode.name for inode in self._fs.list_inode(current_inode)]
 
+    def do_rmidx(self, arg):
+        '''
+        Remove index from database.
+        Todo: to implement
+        '''
+        pass
+
     def do_q(self, arg):
         'Quit shell'
         return True
 
+    def do_find(self, arg):
+        results = self._fs.find_by_name(self._current_inode, arg)
+        if results:
+            for file in results:
+                print(F'{file.name}')
+        else:
+            print('No result')
+
     def do_exit(self, arg):
         'Quit shell'
         return True
+
